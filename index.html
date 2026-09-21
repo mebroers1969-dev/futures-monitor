@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Futures Orderflow & Paper Trading Monitor</title>
+  <title>Futures Orderflow & Auto-Paper Trader</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -72,10 +72,10 @@
     .signal-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
     .signal-desc { font-size: 14px; color: #94a3b8; }
 
-    /* Paper Trading Positie Kaart */
+    /* Auto Paper Trading Positie Paneel */
     .position-panel {
       background: #1e293b;
-      border: 1px solid #3b82f6;
+      border: 2px solid #38bdf8;
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 24px;
@@ -83,39 +83,29 @@
     }
     .position-panel.open {
       display: block;
+      animation: fadeIn 0.4s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .panel-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid #334155;
-      padding-bottom: 10px;
+      padding-bottom: 12px;
       margin-bottom: 14px;
     }
     .pnl-badge {
-      font-size: 20px;
+      font-size: 22px;
       font-weight: 800;
     }
     .pos-details {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
       font-size: 14px;
-    }
-
-    .btn-test {
-      background: #334155;
-      color: #94a3b8;
-      border: 1px solid #475569;
-      padding: 6px 14px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-      transition: background 0.2s;
-    }
-    .btn-test:hover {
-      background: #475569;
-      color: #f8fafc;
     }
 
     table {
@@ -140,12 +130,11 @@
 <div class="container">
   <header>
     <div>
-      <h1>BTCUSDT Futures Monitor & Paper Trader</h1>
-      <span style="font-size: 12px; color: #94a3b8;">Simulatiemodus: orders worden fictief uitgevoerd</span>
+      <h1>BTCUSDT Auto-Trader (Paper Trading)</h1>
+      <span style="font-size: 12px; color: #94a3b8;">Configuratie: $100 USD Marge | 10x Leverage | Automatische Executie</span>
     </div>
     <div>
-      <button class="btn-test" onclick="triggerTestOrder()">⚡ Simuleer Signaal (Test)</button>
-      <span id="wsStatus" class="status-badge connecting" style="margin-left: 8px;">Verbinden...</span>
+      <span id="wsStatus" class="status-badge connecting">Verbinden...</span>
     </div>
   </header>
 
@@ -172,41 +161,44 @@
   <!-- Signaalbox -->
   <div id="signalBox" class="signal-box">
     <div id="signalTitle" class="signal-title">Wachten op Setup...</div>
-    <div id="signalDesc" class="signal-desc">Data wordt binnengehaald via live Bybit stream.</div>
+    <div id="signalDesc" class="signal-desc">Het systeem scant continu op de -2σ absorptieconditie.</div>
   </div>
 
-  <!-- Virtuele Positie Paneel -->
+  <!-- Live Automatische Positie Paneel -->
   <div id="positionPanel" class="position-panel">
     <div class="panel-header">
       <div>
-        <span style="font-weight: 700; color: #38bdf8; font-size: 16px;">VIRTUELE POSITIE ACTIEF: LONG 0.50 BTC</span>
+        <span id="posTitle" style="font-weight: 700; color: #38bdf8; font-size: 17px;">ACTIEVE SIMULATIE: LONG 10x</span>
         <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;" id="posOpenTime">Geopend om: -</div>
       </div>
-      <div id="livePnl" class="pnl-badge text-green">+$0.00 (0.00%)</div>
+      <div id="livePnl" class="pnl-badge text-green">+$0.00 (+0.00%)</div>
     </div>
     <div class="pos-details">
-      <div><span style="color: #94a3b8;">Entry:</span> <strong id="posEntry">-</strong></div>
-      <div><span style="color: #f87171;">Stop-Loss:</span> <strong id="posSl">-</strong></div>
-      <div><span style="color: #34d399;">Take-Profit:</span> <strong id="posTp">-</strong></div>
-      <div><span style="color: #94a3b8;">Risico/Opbrengst:</span> <strong id="posRr">1:2</strong></div>
+      <div><span style="color: #94a3b8;">Marge / Positie:</span> <br><strong>$100.00 ($1,000 Positiewaarde)</strong></div>
+      <div><span style="color: #94a3b8;">Grootte (BTC):</span> <br><strong id="posSize">-</strong></div>
+      <div><span style="color: #94a3b8;">Entry Koers:</span> <br><strong id="posEntry">-</strong></div>
+      <div><span style="color: #f87171;">Stop-Loss:</span> <br><strong id="posSl">-</strong></div>
+      <div><span style="color: #34d399;">Take-Profit:</span> <br><strong id="posTp">-</strong></div>
     </div>
   </div>
 
   <!-- Trade Geschiedenis -->
-  <h3 style="font-size: 15px; margin-bottom: 10px; color: #cbd5e1;">Gesimuleerde Trade Geschiedenis</h3>
+  <h3 style="font-size: 15px; margin-bottom: 10px; color: #cbd5e1;">Automatisch Uitgevoerde Simulatietrades</h3>
   <table>
     <thead>
       <tr>
         <th>Tijd</th>
         <th>Type</th>
+        <th>Inleg (Marge)</th>
         <th>Entry</th>
         <th>Exit</th>
         <th>P&L ($)</th>
+        <th>ROE (%)</th>
         <th>Reden Exit</th>
       </tr>
     </thead>
     <tbody id="tradeLogBody">
-      <tr><td colspan="6" style="text-align: center; color: #64748b;">Nog geen gesimuleerde trades voltooid</td></tr>
+      <tr><td colspan="8" style="text-align: center; color: #64748b;">Nog geen automatische trades uitgevoerd</td></tr>
     </tbody>
   </table>
 
@@ -229,13 +221,18 @@
 </div>
 
 <script>
+  // CONFIGURATIE PARAMETERS
+  const MARGIN_USD = 100.0;    // $100 inleg
+  const LEVERAGE = 10;         // 10x hefboom
+  const NOTIONAL_VALUE = MARGIN_USD * LEVERAGE; // $1.000 totale positiegrootte
+
   let currentPrice = 0;
   let cumulativeDelta = 0;
   let candles = [];
   let pingInterval = null;
 
   // Paper Trading State
-  let activePosition = null; // { type: 'LONG', size: 0.5, entry: 0, sl: 0, tp: 0, time: '' }
+  let activePosition = null; 
   let tradeHistory = [];
 
   const wsStatus = document.getElementById('wsStatus');
@@ -250,6 +247,8 @@
   
   // Positie Elementen
   const positionPanel = document.getElementById('positionPanel');
+  const posTitle = document.getElementById('posTitle');
+  const posSize = document.getElementById('posSize');
   const posEntry = document.getElementById('posEntry');
   const posSl = document.getElementById('posSl');
   const posTp = document.getElementById('posTp');
@@ -280,6 +279,7 @@
       const msg = JSON.parse(event.data);
       if (!msg.topic) return;
 
+      // 1. Trades Feed
       if (msg.topic === 'publicTrade.BTCUSDT' && msg.data) {
         msg.data.forEach(t => {
           currentPrice = parseFloat(t.p);
@@ -292,11 +292,11 @@
         valCvd.textContent = (cumulativeDelta >= 0 ? '+' : '') + cumulativeDelta.toFixed(2);
         valCvd.className = 'card-value ' + (cumulativeDelta >= 0 ? 'text-green' : 'text-red');
 
-        // Update actieve positie & setup check
         trackActivePosition();
         evaluateSetup();
       }
 
+      // 2. Klines Feed voor VWAP
       if (msg.topic === 'kline.5.BTCUSDT' && msg.data) {
         const k = msg.data[0];
         const candle = {
@@ -373,13 +373,13 @@
 
     if (atSupport && absorption) {
       signalBox.classList.add('active');
-      signalTitle.innerHTML = '🚨 ABSORPTION LONG SETUP GEDETECTEERD!';
+      signalTitle.innerHTML = '🚨 ABSORPTION LONG SETUP ACTIEF!';
       signalTitle.style.color = '#34d399';
-      signalDesc.textContent = `Prijs raakt de -2σ band ($${window.currentLowerBand.toFixed(1)}) met positieve orderflow absorptie.`;
+      signalDesc.textContent = `Prijs raakt de -2σ band ($${window.currentLowerBand.toFixed(1)}) met positieve CVD absorptie.`;
 
-      // SCHIET VIRTUELE ORDER IN (als er nog geen positie open is)
+      // AUTOMATISCHE ORDER PLAATSING: Schiet automatisch in als er nog geen positie openstaat!
       if (!activePosition) {
-        executePaperOrder('Automatisch Signaal');
+        executeAutoOrder();
       }
     } else if (atSupport) {
       signalBox.classList.remove('active');
@@ -394,28 +394,41 @@
     }
   }
 
-  // PAPER TRADING LOGICA
-  function executePaperOrder(triggerReason) {
+  // AUTOMATISCHE EXECUTIE MOTOR
+  function executeAutoOrder() {
     if (activePosition || currentPrice === 0) return;
 
-    // Dynamische stop-loss (1.5x standaarddeviatie of $150 min)
-    const slDistance = Math.max(150, (window.currentStdev || 100) * 1.5);
+    // Bereken contractgrootte: $1.000 totale positie / BTC prijs
+    const btcAmount = NOTIONAL_VALUE / currentPrice;
+
+    // Stop-loss: 1.5x standaarddeviatie onder entry (minimaal $100 afstand)
+    const slDistance = Math.max(100, (window.currentStdev || 80) * 1.5);
     const sl = currentPrice - slDistance;
-    const tp = window.currentVwap && window.currentVwap > currentPrice ? window.currentVwap : (currentPrice + (slDistance * 2));
+    
+    // Take-profit: terug naar de sessie VWAP
+    const tp = window.currentVwap && window.currentVwap > currentPrice 
+               ? window.currentVwap 
+               : (currentPrice + (slDistance * 1.5));
 
     activePosition = {
       type: 'LONG',
-      size: 0.50, // 0.5 BTC fictief
+      margin: MARGIN_USD,
+      leverage: LEVERAGE,
+      notional: NOTIONAL_VALUE,
+      size: btcAmount,
       entry: currentPrice,
       sl: sl,
       tp: tp,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     };
 
+    // UI Bijwerken
+    posTitle.textContent = `ACTIEVE SIMULATIE: LONG 10x (${btcAmount.toFixed(4)} BTC)`;
+    posSize.textContent = `${btcAmount.toFixed(4)} BTC`;
     posEntry.textContent = '$' + activePosition.entry.toFixed(1);
     posSl.textContent = '$' + activePosition.sl.toFixed(1);
     posTp.textContent = '$' + activePosition.tp.toFixed(1);
-    posOpenTime.textContent = `Geopend om: ${activePosition.time} (${triggerReason})`;
+    posOpenTime.textContent = `Automatisch geopend om: ${activePosition.time}`;
 
     positionPanel.classList.add('open');
   }
@@ -423,35 +436,38 @@
   function trackActivePosition() {
     if (!activePosition) return;
 
-    // Bereken ongerealiseerde P&L
-    const diff = currentPrice - activePosition.entry;
-    const pnlUsd = diff * activePosition.size;
-    const pnlPct = (diff / activePosition.entry) * 100;
+    // P&L berekenen met hefboom
+    const priceDiffPct = (currentPrice - activePosition.entry) / activePosition.entry;
+    const roePct = priceDiffPct * activePosition.leverage * 100; // Return on Equity met 10x leverage
+    const pnlUsd = (activePosition.margin * roePct) / 100;
 
     const sign = pnlUsd >= 0 ? '+' : '';
-    livePnl.textContent = `${sign}$${pnlUsd.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
+    livePnl.textContent = `${sign}$${pnlUsd.toFixed(2)} (${sign}${roePct.toFixed(2)}% ROE)`;
     livePnl.className = 'pnl-badge ' + (pnlUsd >= 0 ? 'text-green' : 'text-red');
 
-    // Check of Take-Profit is geraakt
+    // Automatische Take-Profit
     if (currentPrice >= activePosition.tp) {
-      closePosition(currentPrice, 'Take-Profit Geraakt');
+      closePosition(currentPrice, 'Take-Profit (VWAP) Geraakt');
     }
-    // Check of Stop-Loss is geraakt
+    // Automatische Stop-Loss
     else if (currentPrice <= activePosition.sl) {
       closePosition(currentPrice, 'Stop-Loss Geraakt');
     }
   }
 
   function closePosition(exitPrice, reason) {
-    const diff = exitPrice - activePosition.entry;
-    const pnlUsd = diff * activePosition.size;
+    const priceDiffPct = (exitPrice - activePosition.entry) / activePosition.entry;
+    const roePct = priceDiffPct * activePosition.leverage * 100;
+    const pnlUsd = (activePosition.margin * roePct) / 100;
 
     tradeHistory.unshift({
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: activePosition.type,
+      type: `${activePosition.type} 10x`,
+      margin: `$${activePosition.margin.toFixed(0)}`,
       entry: activePosition.entry,
       exit: exitPrice,
       pnl: pnlUsd,
+      roe: roePct,
       reason: reason
     });
 
@@ -470,17 +486,15 @@
         <tr>
           <td>${t.time}</td>
           <td><span style="color: #38bdf8; font-weight: bold;">${t.type}</span></td>
+          <td>${t.margin}</td>
           <td>$${t.entry.toFixed(1)}</td>
           <td>$${t.exit.toFixed(1)}</td>
           <td class="${pnlColor}">${sign}$${t.pnl.toFixed(2)}</td>
+          <td class="${pnlColor}">${sign}${t.roe.toFixed(2)}%</td>
           <td>${t.reason}</td>
         </tr>
       `;
     }).join('');
-  }
-
-  function triggerTestOrder() {
-    executePaperOrder('Handmatige Testknop');
   }
 
   function renderTable() {
