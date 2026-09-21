@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Futures Orderflow & VWAP Monitor</title>
+  <title>Futures Orderflow & Paper Trading Monitor</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -13,7 +13,7 @@
       padding: 24px;
     }
     .container {
-      max-width: 900px;
+      max-width: 950px;
       margin: 0 auto;
     }
     header {
@@ -54,6 +54,7 @@
     .text-green { color: #34d399; }
     .text-red { color: #f87171; }
     .text-blue { color: #60a5fa; }
+    .text-yellow { color: #facc15; }
 
     .signal-box {
       background: #1e293b;
@@ -71,12 +72,59 @@
     .signal-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
     .signal-desc { font-size: 14px; color: #94a3b8; }
 
+    /* Paper Trading Positie Kaart */
+    .position-panel {
+      background: #1e293b;
+      border: 1px solid #3b82f6;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+      display: none;
+    }
+    .position-panel.open {
+      display: block;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+    }
+    .pnl-badge {
+      font-size: 20px;
+      font-weight: 800;
+    }
+    .pos-details {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      font-size: 14px;
+    }
+
+    .btn-test {
+      background: #334155;
+      color: #94a3b8;
+      border: 1px solid #475569;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.2s;
+    }
+    .btn-test:hover {
+      background: #475569;
+      color: #f8fafc;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
       background: #1e293b;
       border-radius: 8px;
       overflow: hidden;
+      margin-bottom: 24px;
     }
     th, td {
       padding: 10px 14px;
@@ -91,10 +139,17 @@
 
 <div class="container">
   <header>
-    <h1>BTCUSDT Perp Monitor</h1>
-    <div id="wsStatus" class="status-badge connecting">Verbinden met Bybit...</div>
+    <div>
+      <h1>BTCUSDT Futures Monitor & Paper Trader</h1>
+      <span style="font-size: 12px; color: #94a3b8;">Simulatiemodus: orders worden fictief uitgevoerd</span>
+    </div>
+    <div>
+      <button class="btn-test" onclick="triggerTestOrder()">⚡ Simuleer Signaal (Test)</button>
+      <span id="wsStatus" class="status-badge connecting" style="margin-left: 8px;">Verbinden...</span>
+    </div>
   </header>
 
+  <!-- Belangrijkste metrics -->
   <div class="grid">
     <div class="card">
       <div class="card-title">Huidige Prijs</div>
@@ -114,12 +169,49 @@
     </div>
   </div>
 
+  <!-- Signaalbox -->
   <div id="signalBox" class="signal-box">
     <div id="signalTitle" class="signal-title">Wachten op Setup...</div>
     <div id="signalDesc" class="signal-desc">Data wordt binnengehaald via live Bybit stream.</div>
   </div>
 
-  <h3 style="font-size: 15px; margin-bottom: 10px; color: #cbd5e1;">Recente 5m Candles & Trades</h3>
+  <!-- Virtuele Positie Paneel -->
+  <div id="positionPanel" class="position-panel">
+    <div class="panel-header">
+      <div>
+        <span style="font-weight: 700; color: #38bdf8; font-size: 16px;">VIRTUELE POSITIE ACTIEF: LONG 0.50 BTC</span>
+        <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;" id="posOpenTime">Geopend om: -</div>
+      </div>
+      <div id="livePnl" class="pnl-badge text-green">+$0.00 (0.00%)</div>
+    </div>
+    <div class="pos-details">
+      <div><span style="color: #94a3b8;">Entry:</span> <strong id="posEntry">-</strong></div>
+      <div><span style="color: #f87171;">Stop-Loss:</span> <strong id="posSl">-</strong></div>
+      <div><span style="color: #34d399;">Take-Profit:</span> <strong id="posTp">-</strong></div>
+      <div><span style="color: #94a3b8;">Risico/Opbrengst:</span> <strong id="posRr">1:2</strong></div>
+    </div>
+  </div>
+
+  <!-- Trade Geschiedenis -->
+  <h3 style="font-size: 15px; margin-bottom: 10px; color: #cbd5e1;">Gesimuleerde Trade Geschiedenis</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Tijd</th>
+        <th>Type</th>
+        <th>Entry</th>
+        <th>Exit</th>
+        <th>P&L ($)</th>
+        <th>Reden Exit</th>
+      </tr>
+    </thead>
+    <tbody id="tradeLogBody">
+      <tr><td colspan="6" style="text-align: center; color: #64748b;">Nog geen gesimuleerde trades voltooid</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Recente Candles -->
+  <h3 style="font-size: 15px; margin-bottom: 10px; color: #cbd5e1;">Recente 5m Candles</h3>
   <table>
     <thead>
       <tr>
@@ -142,6 +234,10 @@
   let candles = [];
   let pingInterval = null;
 
+  // Paper Trading State
+  let activePosition = null; // { type: 'LONG', size: 0.5, entry: 0, sl: 0, tp: 0, time: '' }
+  let tradeHistory = [];
+
   const wsStatus = document.getElementById('wsStatus');
   const valPrice = document.getElementById('valPrice');
   const valVwap = document.getElementById('valVwap');
@@ -151,26 +247,28 @@
   const signalTitle = document.getElementById('signalTitle');
   const signalDesc = document.getElementById('signalDesc');
   const candleTableBody = document.getElementById('candleTableBody');
+  
+  // Positie Elementen
+  const positionPanel = document.getElementById('positionPanel');
+  const posEntry = document.getElementById('posEntry');
+  const posSl = document.getElementById('posSl');
+  const posTp = document.getElementById('posTp');
+  const posOpenTime = document.getElementById('posOpenTime');
+  const livePnl = document.getElementById('livePnl');
+  const tradeLogBody = document.getElementById('tradeLogBody');
 
   function initSocket() {
-    // Bybit Linear v5 Public Stream (Geen restricties in NL/EU)
     const ws = new WebSocket('wss://stream.bybit.com/v5/public/linear');
 
     ws.onopen = () => {
       wsStatus.textContent = 'Live Verbonden (Bybit)';
       wsStatus.className = 'status-badge connected';
 
-      // Abonneer op trades en klines (5m)
-      const subPayload = {
+      ws.send(JSON.stringify({
         op: "subscribe",
-        args: [
-          "publicTrade.BTCUSDT",
-          "kline.5.BTCUSDT"
-        ]
-      };
-      ws.send(JSON.stringify(subPayload));
+        args: ["publicTrade.BTCUSDT", "kline.5.BTCUSDT"]
+      }));
 
-      // Bybit vereist elke 20 sec een ping om de verbinding open te houden
       pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ op: "ping" }));
@@ -182,12 +280,10 @@
       const msg = JSON.parse(event.data);
       if (!msg.topic) return;
 
-      // 1. Live Trades verwerken (Tick-by-tick voor prijs & CVD)
       if (msg.topic === 'publicTrade.BTCUSDT' && msg.data) {
         msg.data.forEach(t => {
           currentPrice = parseFloat(t.p);
           const qty = parseFloat(t.v);
-          // 'Buy' = Taker Buy op Ask (+), 'Sell' = Taker Sell op Bid (-)
           const delta = (t.S === 'Buy') ? qty : -qty;
           cumulativeDelta += delta;
         });
@@ -196,10 +292,11 @@
         valCvd.textContent = (cumulativeDelta >= 0 ? '+' : '') + cumulativeDelta.toFixed(2);
         valCvd.className = 'card-value ' + (cumulativeDelta >= 0 ? 'text-green' : 'text-red');
 
+        // Update actieve positie & setup check
+        trackActivePosition();
         evaluateSetup();
       }
 
-      // 2. 5-Minuten Candles verwerken voor VWAP
       if (msg.topic === 'kline.5.BTCUSDT' && msg.data) {
         const k = msg.data[0];
         const candle = {
@@ -224,14 +321,13 @@
       }
     };
 
-    ws.onerror = (err) => {
-      console.error('WS Error:', err);
-      wsStatus.textContent = 'Verbindingsfout';
+    ws.onerror = () => {
+      wsStatus.textContent = 'Fout';
       wsStatus.className = 'status-badge';
     };
 
     ws.onclose = () => {
-      wsStatus.textContent = 'Verbroken, herverbinden...';
+      wsStatus.textContent = 'Herverbinden...';
       wsStatus.className = 'status-badge connecting';
       clearInterval(pingInterval);
       setTimeout(initSocket, 3000);
@@ -252,7 +348,6 @@
 
     const vwap = cumVol > 0 ? cumPV / cumVol : currentPrice;
 
-    // Standaarddeviatie
     let varianceSum = 0;
     candles.forEach(c => {
       const typical = (c.high + c.low + c.close) / 3;
@@ -267,6 +362,7 @@
 
     window.currentVwap = vwap;
     window.currentLowerBand = lowerBand2;
+    window.currentStdev = stdev;
   }
 
   function evaluateSetup() {
@@ -279,7 +375,12 @@
       signalBox.classList.add('active');
       signalTitle.innerHTML = '🚨 ABSORPTION LONG SETUP GEDETECTEERD!';
       signalTitle.style.color = '#34d399';
-      signalDesc.textContent = `Prijs ($${currentPrice.toFixed(1)}) raakt de -2σ band ($${window.currentLowerBand.toFixed(1)}) met positieve CVD absorptie.`;
+      signalDesc.textContent = `Prijs raakt de -2σ band ($${window.currentLowerBand.toFixed(1)}) met positieve orderflow absorptie.`;
+
+      // SCHIET VIRTUELE ORDER IN (als er nog geen positie open is)
+      if (!activePosition) {
+        executePaperOrder('Automatisch Signaal');
+      }
     } else if (atSupport) {
       signalBox.classList.remove('active');
       signalTitle.textContent = '👀 Prijs bij Support (Wachten op Absorptie)';
@@ -291,6 +392,95 @@
       signalTitle.style.color = '#f8fafc';
       signalDesc.textContent = 'Markt consolideert binnen normale volatiliteitsbanden.';
     }
+  }
+
+  // PAPER TRADING LOGICA
+  function executePaperOrder(triggerReason) {
+    if (activePosition || currentPrice === 0) return;
+
+    // Dynamische stop-loss (1.5x standaarddeviatie of $150 min)
+    const slDistance = Math.max(150, (window.currentStdev || 100) * 1.5);
+    const sl = currentPrice - slDistance;
+    const tp = window.currentVwap && window.currentVwap > currentPrice ? window.currentVwap : (currentPrice + (slDistance * 2));
+
+    activePosition = {
+      type: 'LONG',
+      size: 0.50, // 0.5 BTC fictief
+      entry: currentPrice,
+      sl: sl,
+      tp: tp,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    };
+
+    posEntry.textContent = '$' + activePosition.entry.toFixed(1);
+    posSl.textContent = '$' + activePosition.sl.toFixed(1);
+    posTp.textContent = '$' + activePosition.tp.toFixed(1);
+    posOpenTime.textContent = `Geopend om: ${activePosition.time} (${triggerReason})`;
+
+    positionPanel.classList.add('open');
+  }
+
+  function trackActivePosition() {
+    if (!activePosition) return;
+
+    // Bereken ongerealiseerde P&L
+    const diff = currentPrice - activePosition.entry;
+    const pnlUsd = diff * activePosition.size;
+    const pnlPct = (diff / activePosition.entry) * 100;
+
+    const sign = pnlUsd >= 0 ? '+' : '';
+    livePnl.textContent = `${sign}$${pnlUsd.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)`;
+    livePnl.className = 'pnl-badge ' + (pnlUsd >= 0 ? 'text-green' : 'text-red');
+
+    // Check of Take-Profit is geraakt
+    if (currentPrice >= activePosition.tp) {
+      closePosition(currentPrice, 'Take-Profit Geraakt');
+    }
+    // Check of Stop-Loss is geraakt
+    else if (currentPrice <= activePosition.sl) {
+      closePosition(currentPrice, 'Stop-Loss Geraakt');
+    }
+  }
+
+  function closePosition(exitPrice, reason) {
+    const diff = exitPrice - activePosition.entry;
+    const pnlUsd = diff * activePosition.size;
+
+    tradeHistory.unshift({
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: activePosition.type,
+      entry: activePosition.entry,
+      exit: exitPrice,
+      pnl: pnlUsd,
+      reason: reason
+    });
+
+    activePosition = null;
+    positionPanel.classList.remove('open');
+    renderTradeLog();
+  }
+
+  function renderTradeLog() {
+    if (tradeHistory.length === 0) return;
+
+    tradeLogBody.innerHTML = tradeHistory.map(t => {
+      const pnlColor = t.pnl >= 0 ? 'text-green' : 'text-red';
+      const sign = t.pnl >= 0 ? '+' : '';
+      return `
+        <tr>
+          <td>${t.time}</td>
+          <td><span style="color: #38bdf8; font-weight: bold;">${t.type}</span></td>
+          <td>$${t.entry.toFixed(1)}</td>
+          <td>$${t.exit.toFixed(1)}</td>
+          <td class="${pnlColor}">${sign}$${t.pnl.toFixed(2)}</td>
+          <td>${t.reason}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function triggerTestOrder() {
+    executePaperOrder('Handmatige Testknop');
   }
 
   function renderTable() {
