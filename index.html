@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>Futures Orderflow & VWAP Monitor</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      margin: 0;
+      padding: 24px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    h1 { margin: 0; font-size: 22px; color: #38bdf8; }
+    .status-badge {
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      background: #1e293b;
+      border: 1px solid #475569;
+    }
+    .status-badge.connected { background: #065f46; color: #6ee7b7; border-color: #059669; }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #1e293b;
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+    .card-title { font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
+    .card-value { font-size: 22px; font-weight: 700; }
+    
+    .text-green { color: #34d399; }
+    .text-red { color: #f87171; }
+    .text-blue { color: #60a5fa; }
+
+    .signal-box {
+      background: #1e293b;
+      border: 2px dashed #475569;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 24px;
+      transition: all 0.3s ease;
+    }
+    .signal-box.active {
+      background: rgba(16, 185, 129, 0.15);
+      border: 2px solid #10b981;
+    }
+    .signal-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+    .signal-desc { font-size: 14px; color: #94a3b8; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #1e293b;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 13px;
+      border-bottom: 1px solid #334155;
+    }
+    th { background: #0f172a; color: #94a3b8; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>BTCUSDT Futures Monitor</h1>
+    <div id="wsStatus" class="status-badge">Verbinden...</div>
+  </header>
+
+  <!-- Belangrijkste metrics -->
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Huidige Prijs</div>
+      <div id="valPrice" class="card-value">-</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Session VWAP</div>
+      <div id="valVwap" class="card-value text-blue">-</div>
+    </div>
+    <div class="card">
+      <div class="card-title">-2σ Band (Support)</div>
+      <div id="valLowerBand" class="card-value text-red">-</div>
+    </div>
+    <div class="card">
+      <div class="card-title">CVD (Delta van Sessie)</div>
+      <div id="valCvd" class="card-value">-</div>
+    </div>
+  </div>
+
+  <!-- Signaalbox -->
+  <div id="signalBox" class="signal-box">
+    <div id="signalTitle" class="signal-title">Wachten op Setup...</div>
+    <div id="signalDesc" class="signal-desc">Prijs en CVD worden gemonitord op de 5-minuten cyclus.</div>
+  </div>
+
+  <!-- Recente Candles / Ticks overzicht -->
+  <h3 style="font-size: 15px; margin-bottom: 10px; color: #cbd5e1;">Recente 5m Candles & Delta</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Tijd</th>
+        <th>Close</th>
+        <th>VWAP</th>
+        <th>Volume</th>
+        <th>Bar Delta</th>
+      </tr>
+    </thead>
+    <tbody id="candleTableBody">
+      <tr><td colspan="5" style="text-align: center; color: #64748b;">Data verzamelen...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  // Parameters
+  const SYMBOL = 'btcusdt';
+  const TIMEFRAME = '5m';
+  
+  // Data State
+  let currentPrice = 0;
+  let cumulativeDelta = 0;
+  let candles = []; // Bevat { open, high, low, close, volume, pv, buyVol, sellVol, timestamp }
+
+  const wsStatus = document.getElementById('wsStatus');
+  const valPrice = document.getElementById('valPrice');
+  const valVwap = document.getElementById('valVwap');
+  const valLowerBand = document.getElementById('valLowerBand');
+  const valCvd = document.getElementById('valCvd');
+  const signalBox = document.getElementById('signalBox');
+  const signalTitle = document.getElementById('signalTitle');
+  const signalDesc = document.getElementById('signalDesc');
+  const candleTableBody = document.getElementById('candleTableBody');
+
+  // Verbind met Binance Futures Public WebSocket (Geen API-sleutel nodig)
+  // We luisteren tegelijk naar 5m klines én de live trade stream (@aggTrade)
+  const socketUrl = `wss://fstream.binance.com/stream?streams=${SYMBOL}@kline_${TIMEFRAME}/${SYMBOL}@aggTrade`;
+  const ws = new WebSocket(socketUrl);
+
+  ws.onopen = () => {
+    wsStatus.textContent = 'Live Verbonden';
+    wsStatus.classList.add('connected');
+  };
+
+  ws.onclose = () => {
+    wsStatus.textContent = 'Verbinding Verbroken';
+    wsStatus.classList.remove('connected');
+  };
+
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    const stream = message.stream;
+    const data = message.data;
+
+    // 1. Verwerk Trade Delta (@aggTrade stream)
+    if (stream.endsWith('@aggTrade')) {
+      currentPrice = parseFloat(data.p);
+      const qty = parseFloat(data.q);
+      const isBuyerMaker = data.m; 
+      
+      // Als de koper de maker was, was de verkoper agressief (Taker Sell = negatieve delta)
+      const delta = isBuyerMaker ? -qty : qty;
+      cumulativeDelta += delta;
+
+      valPrice.textContent = '$' + currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2 });
+      valCvd.textContent = (cumulativeDelta >= 0 ? '+' : '') + cumulativeDelta.toFixed(2);
+      valCvd.className = 'card-value ' + (cumulativeDelta >= 0 ? 'text-green' : 'text-red');
+
+      evaluateSetup();
+    }
+
+    // 2. Verwerk Candle Data voor VWAP (@kline stream)
+    if (stream.endsWith(`@kline_${TIMEFRAME}`)) {
+      const k = data.k;
+      const isFinal = k.x;
+      const candle = {
+        time: new Date(k.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        open: parseFloat(k.o),
+        high: parseFloat(k.h),
+        low: parseFloat(k.l),
+        close: parseFloat(k.c),
+        volume: parseFloat(k.v),
+        buyVol: parseFloat(k.V), // Taker buy base volume
+        sellVol: parseFloat(k.v) - parseFloat(k.V)
+      };
+
+      // Werk de laatste candle bij of voeg een nieuwe toe
+      if (candles.length > 0 && !isFinal) {
+        candles[candles.length - 1] = candle;
+      } else if (isFinal) {
+        candles.push(candle);
+        if (candles.length > 50) candles.shift(); // Beperk geheugen
+        renderTable();
+      } else if (candles.length === 0) {
+        candles.push(candle);
+      }
+
+      calculateVWAP();
+      evaluateSetup();
+    }
+  };
+
+  function calculateVWAP() {
+    if (candles.length === 0) return;
+
+    let cumPV = 0;
+    let cumVol = 0;
+
+    candles.forEach(c => {
+      const typical = (c.high + c.low + c.close) / 3;
+      cumPV += typical * c.volume;
+      cumVol += c.volume;
+    });
+
+    const vwap = cumVol > 0 ? cumPV / cumVol : currentPrice;
+
+    // Bereken Standaarddeviatie
+    let varianceSum = 0;
+    candles.forEach(c => {
+      const typical = (c.high + c.low + c.close) / 3;
+      varianceSum += Math.pow(typical - vwap, 2) * c.volume;
+    });
+
+    const stdev = cumVol > 0 ? Math.sqrt(varianceSum / cumVol) : 0;
+    const lowerBand2 = vwap - (2 * stdev);
+
+    valVwap.textContent = '$' + vwap.toFixed(1);
+    valLowerBand.textContent = '$' + lowerBand2.toFixed(1);
+
+    // Bewaar voor logica
+    window.currentVwap = vwap;
+    window.currentLowerBand = lowerBand2;
+  }
+
+  function evaluateSetup() {
+    if (!window.currentLowerBand || currentPrice === 0) return;
+
+    const atSupport = currentPrice <= window.currentLowerBand;
+    const absorption = cumulativeDelta > 0;
+
+    if (atSupport && absorption) {
+      signalBox.classList.add('active');
+      signalTitle.innerHTML = '🚨 ABSORPTION LONG SETUP GEDETECTEERD!';
+      signalTitle.style.color = '#34d399';
+      signalDesc.textContent = `Prijs ($${currentPrice.toFixed(1)}) raakt de -2σ band ($${window.currentLowerBand.toFixed(1)}) terwijl cumulatieve delta positief blijft (+${cumulativeDelta.toFixed(1)}).`;
+    } else if (atSupport) {
+      signalBox.classList.remove('active');
+      signalTitle.textContent = '👀 Prijs bij Support (Wachten op Absorptie)';
+      signalTitle.style.color = '#facc15';
+      signalDesc.textContent = 'Prijs is oversold, maar CVD toont nog geen actieve kopers.';
+    } else {
+      signalBox.classList.remove('active');
+      signalTitle.textContent = 'Geen Actieve Setup';
+      signalTitle.style.color = '#f8fafc';
+      signalDesc.textContent = 'Markt beweegt binnen normale volatiliteitsbanden.';
+    }
+  }
+
+  function renderTable() {
+    const rows = [...candles].reverse().slice(0, 5).map(c => {
+      const delta = c.buyVol - c.sellVol;
+      const deltaClass = delta >= 0 ? 'text-green' : 'text-red';
+      return `
+        <tr>
+          <td>${c.time}</td>
+          <td>$${c.close.toFixed(1)}</td>
+          <td>${window.currentVwap ? '$' + window.currentVwap.toFixed(1) : '-'}</td>
+          <td>${c.volume.toFixed(1)}</td>
+          <td class="${deltaClass}">${(delta >= 0 ? '+' : '') + delta.toFixed(2)}</td>
+        </tr>
+      `;
+    }).join('');
+    candleTableBody.innerHTML = rows;
+  }
+</script>
+</body>
+</html>
